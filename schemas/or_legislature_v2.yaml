@@ -1,0 +1,200 @@
+# or_legislature_v2.yaml
+# Oregon Legislative Assembly — regular session measure procedure.
+#
+# WRITTEN IN EFFECTIVE-DATED FORM, not pin-to-creation form.
+# A transition resolves the schema in force at its occurred_at. An item's
+# history may therefore span v1 and v2. This is the only model that matches
+# how legislatures actually work: rule changes have dates, and they do not
+# retroactively unmake procedure that already happened.
+#
+# VERIFICATION STATUS: rules marked `verified: false` are drafted from
+# general knowledge and MUST be checked against the cited source before this
+# pack ships to anyone. Nothing here is warranted correct yet.
+
+pack:
+  id: or_legislature
+  version: 2.0.0
+  effective_from: "2025-01-01"   # first session this ruleset is asserted for
+  effective_to: null             # null = still in force
+  supersedes: 1.0.0
+  extends: base/bicameral@1.0.0
+  # extends is resolved and FLATTENED at registration; the flattened form is
+  # hashed and that hash is stamped on every transition validated against it.
+  # Without this, upgrading base/bicameral silently rewrites Oregon's history.
+  compiled_hash: null            # populated by the loader, never hand-edited
+
+jurisdiction:
+  name: Oregon Legislative Assembly
+  chambers: [senate, house]
+  # Oregon runs long (odd-year) and short (even-year) regular sessions.
+  # Measures do NOT carry over between sessions — see terminal state `died_sine_die`.
+  session_scoped: true
+
+states:
+  # --- pre-floor -----------------------------------------------------------
+  - id: introduced
+    chamber: origin
+  - id: first_reading
+    chamber: origin
+  - id: referred_to_committee
+    chamber: origin
+  - id: in_committee
+    chamber: origin
+  - id: work_session_held
+    chamber: origin
+  - id: referred_to_ways_and_means
+    chamber: origin
+    note: fiscal referral; a distinct path, not a sub-case of in_committee
+  - id: committee_reported_do_pass
+    chamber: origin
+  - id: second_reading
+    chamber: origin
+  - id: third_reading
+    chamber: origin
+  # --- second chamber ------------------------------------------------------
+  - id: passed_origin_chamber
+    chamber: origin
+  - id: in_second_chamber
+    chamber: second
+  - id: passed_second_chamber
+    chamber: second
+  - id: conference_committee
+    chamber: joint
+    note: convened when the chambers do not concur in amendments
+  # --- executive -----------------------------------------------------------
+  - id: sent_to_governor
+    chamber: executive
+    dwell_watch: true            # the state worth measuring time in
+  - id: veto_notice_issued
+    chamber: executive
+    note: >
+      Art. V sec. 15b requires public notice of possible intent to veto in
+      advance of the veto itself. Modeled as its own state because the notice
+      is an observable public event with its own downstream consequences.
+    verified: true
+    source: https://apps.oregon.gov/oregon-newsroom/OR/GOV/Posts/Post/governor-kotek-issues-notice-of-potential-vetoes-for-2025-legislative-session
+  - id: veto_override_pending
+    chamber: joint
+
+terminal_states:
+  - id: enacted
+  - id: enacted_without_signature
+    note: governor neither signs nor returns within the constitutional window
+  - id: vetoed
+  - id: veto_overridden
+    note: >
+      TERMINAL BUT REACHED FROM A TERMINAL STATE. This is the case that breaks
+      naive terminal-state validators — `vetoed` is terminal and yet has a
+      legal successor. Handled below via correction_paths, not by loosening
+      the terminal rule.
+  - id: died_in_committee
+  - id: died_sine_die
+    note: session-scoped death; not a defect, the default outcome for most measures
+
+# Whitelist, not blacklist. An illegal-transitions blacklist can only reject
+# what you thought to enumerate; a whitelist rejects everything you did not.
+# For an auditability product, "we never allowed what we did not declare" is
+# the defensible claim.
+transitions:
+  - [introduced, first_reading]
+  - [first_reading, referred_to_committee]
+  - [referred_to_committee, in_committee]
+  - [in_committee, work_session_held]
+  - [in_committee, died_in_committee]
+  - [in_committee, referred_to_ways_and_means]
+  - [work_session_held, committee_reported_do_pass]
+  - [work_session_held, died_in_committee]
+  - [referred_to_ways_and_means, committee_reported_do_pass]
+  - [referred_to_ways_and_means, died_in_committee]
+  - [committee_reported_do_pass, second_reading]
+  - [second_reading, third_reading]
+  - [third_reading, passed_origin_chamber]
+  - [third_reading, died_sine_die]
+  - [passed_origin_chamber, in_second_chamber]
+  - [in_second_chamber, passed_second_chamber]
+  - [in_second_chamber, died_in_committee]
+  - [in_second_chamber, conference_committee]
+  - [conference_committee, passed_second_chamber]
+  - [conference_committee, died_sine_die]
+  - [passed_second_chamber, sent_to_governor]
+  - [sent_to_governor, enacted]
+  - [sent_to_governor, enacted_without_signature]
+  - [sent_to_governor, veto_notice_issued]
+  - [veto_notice_issued, enacted]          # notice given, veto not exercised
+  - [veto_notice_issued, vetoed]
+
+correction_paths:
+  # The only sanctioned exits from a terminal state. Each requires an explicit
+  # authority cite on the transition record; the validator rejects it otherwise.
+  - from: vetoed
+    to: veto_override_pending
+    requires_authority: true
+  - from: veto_override_pending
+    to: veto_overridden
+    requires_authority: true
+  - from: veto_override_pending
+    to: vetoed
+    note: override attempted and failed; returns to the terminal state
+
+deadlines:
+  # Deadlines are DATA, not validator logic. The engine records elapsed time;
+  # whether a breach is an anomaly is the consumer's policy call.
+  - state: sent_to_governor
+    condition: session_in_progress
+    window: 5
+    unit: business_days
+    verified: false
+    check_against: Oregon Constitution Art. V, sec. 15a/15b
+  - state: sent_to_governor
+    condition: after_sine_die
+    window: 30
+    unit: business_days
+    verified: true
+    source: https://apps.oregon.gov/oregon-newsroom/OR/GOV/Posts/Post/governor-kotek-issues-final-decision-on-vetoes--signing-letters-73305
+  - state: veto_notice_issued
+    window: 5
+    unit: days
+    note: minimum notice period before the veto may be exercised
+    verified: false
+    check_against: https://www.oregonlegislature.gov/lfo/Documents/06_How%20to%20Read%20a%20Legislative%20Measure.pdf
+
+# --- the honest version of migration_map ------------------------------------
+# Two mechanisms, deliberately separated, because conflating them is what makes
+# the "auto-upgrade" claim undeliverable.
+aliases:
+  # Pure relabeling. Mechanically safe, applied on read, loses no information.
+  # This is ~all a migration_map can actually do.
+  governor_review: sent_to_governor
+  in_ways_and_means: referred_to_ways_and_means
+
+migrations:
+  from_version: 1.0.0
+  changes:
+    - kind: rename
+      from: governor_review
+      to: sent_to_governor
+      mechanical: true
+    - kind: state_added
+      state: veto_notice_issued
+      mechanical: false
+      resolution: manual_review
+      reason: >
+        v1 items that reached `vetoed` have no record of whether notice was
+        issued, because v1 had nowhere to put it. There is no derivation that
+        recovers the missing event. These items must be re-sourced from OLIS
+        or flagged as incomplete — NOT synthesized. Any migration tool that
+        silently backfills this state is manufacturing evidence.
+    - kind: transition_removed
+      transition: [in_committee, second_reading]
+      mechanical: false
+      resolution: manual_review
+      reason: >
+        v1 permitted a direct hop that skipped the committee report. Items that
+        used it are not invalid — the move was legal when made. They are pinned
+        to v1 for that segment of their history and must not be revalidated
+        under v2.
+
+metrics:
+  # Outside the validator by design. Thresholds are consumer policy.
+  - name: time_in_current_state
+    applies_to: [sent_to_governor, in_committee, referred_to_ways_and_means]
