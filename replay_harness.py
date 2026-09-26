@@ -157,6 +157,10 @@ RULES: list[tuple[str, str, Optional[str], dict]] = [
     # --- executive / post-passage ----------------------------------------
     ("president_signed",           r"President signed",                 "signed_by_presiding", {"signer": "president"}),
     ("speaker_signed",             r"Speaker signed",                   "signed_by_presiding", {"signer": "speaker"}),
+    # Signed into law with some items struck. The measure is enacted; a later "Veto
+    # sustained" row concerns the struck items, not the measure (see step()).
+    ("governor_signed_line_item",  r"Governor signed with line-item veto", "enacted_line_item_veto",
+                                                                        {"veto_type": "line_item"}),
     ("governor_signed",            r"Governor signed",                  "enacted", {}),
     ("art_v_time_allowed",         r"The time allowed by Article V[^.]*", None, {}),
     ("art_v_time_allowed",         r"The time allowed by Article V[^.]*", None, {}),
@@ -291,15 +295,25 @@ CHAMBER_FLOW = {
                "adopted", "veto_sustained", "veto_overridden"},
     "adopted": {"signed_by_presiding", "committee", "adopted", "third_reading", "passed"},
     "failed": {"committee", "failed", "second_reading", "third_reading", "passed", "adopted"},
-    "signed_by_presiding": {"signed_by_presiding", "enacted", "vetoed", "committee"},
-    "enacted": {"vetoed", "veto_sustained"},
-    "enacted": {"vetoed", "veto_sustained"},
-    "enacted": {"vetoed", "veto_sustained"},
-    "enacted": {"vetoed", "veto_sustained"},
+    "signed_by_presiding": {"signed_by_presiding", "enacted", "enacted_line_item_veto", "vetoed", "committee"},
+    # Enacted is final for the measure. The four duplicated `"enacted": {"vetoed",
+    # "veto_sustained"}` keys that stood here existed only to let HB5050 (2019R1) and
+    # SB5506 (2023R1) replay, which recorded two enacted laws as vetoed. Both were
+    # line-item vetoes; that path is modelled below instead.
+    "enacted": set(),
+    "enacted_line_item_veto": {"line_item_veto_sustained"},
     "vetoed": {"tabled", "veto_sustained", "veto_overridden", "committee", "passed"},
     "tabled": {"veto_sustained", "veto_overridden"},
 }
-TERMINAL = {"veto_sustained", "veto_overridden"}
+TERMINAL = {"veto_sustained", "veto_overridden", "line_item_veto_sustained"}
+
+# After a line-item veto the measure is law. OLIS records the Legislature declining to
+# override the struck items with the same text as a full veto ("Veto sustained in
+# accordance with Art. V, sec. 15b"), so the row is read by where the measure stands:
+# from enacted_line_item_veto it means the item veto stood, not that the measure died.
+CONTEXTUAL_STATE = {
+    ("enacted_line_item_veto", "veto_sustained"): "line_item_veto_sustained",
+}
 
 
 class Halt(Exception):
@@ -322,6 +336,7 @@ class Item:
 
 def step(item: Item, to_state: str, chamber: str, occurred_at: str, rule_id: str, payload: dict):
     frm = item.states.get(chamber)
+    to_state = CONTEXTUAL_STATE.get((frm, to_state), to_state)
     # crossover: origin chamber passed -> second chamber introduction is legal
     if frm is None and to_state == "introduced":
         pass
