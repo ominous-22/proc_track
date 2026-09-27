@@ -132,6 +132,9 @@ RULES: list[tuple[str, str, Optional[str], dict]] = [
     ("taken_from_calendar",        r"Taken from [^.]*Calendar[^.]*",    None, {"recalendared": True}),
     ("placed_on_calendar",         r"[Pp]laced on [^.]*Calendar[^.]*",  None, {"recalendared": True}),
     ("read_special_order",         r"Read as Special Order of Business", "third_reading", {}),
+    # "Motion to suspend the rules passed." is the motion passing, not the measure.
+    # (HB2341, HB2360, 2021R1)
+    ("motion_suspend_passed",      r"Motion to suspend the rules passed", None, {"rules_suspended": True}),
     ("passed",                     r"\bPassed\b",                       "passed", {}),
     ("adopted_cc_report",          r"(Senate|House) adopted Conference Committee Report[^.]*", "passed", {"conference": True}),
     ("repassed",                   r"[Rr]epassed( bill)?",              "passed", {"repassed": True}),
@@ -292,7 +295,7 @@ CHAMBER_FLOW = {
                        "second_reading", "third_reading"},
     "work_session": {"committee", "work_session", "public_hearing",
                      "second_reading", "third_reading"},
-    "second_reading": {"third_reading", "committee", "failed", "passed", "signed_by_presiding"},
+    "second_reading": {"third_reading", "committee", "failed", "signed_by_presiding"},
     "third_reading": {"passed", "adopted", "failed", "committee", "third_reading", "second_reading", "signed_by_presiding"},
     "passed": {"signed_by_presiding", "passed", "committee", "third_reading", "tabled", "second_reading",
                "adopted", "veto_sustained", "veto_overridden"},
