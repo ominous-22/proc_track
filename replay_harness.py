@@ -200,9 +200,15 @@ RULES: list[tuple[str, str, Optional[str], dict]] = [
     ("amendments_distributed",     r"\(Amendments distributed\.?\)",     None, {}),
     ("at_desk_adjournment",        r"At ((President's|Speaker's) desk|Desk) upon adjournment", None, {"location": "desk"}),
     ("governors_message_read",     r"Governor's message read[^.]*",     None, {}),
-    ("conferees_appointed",        r"[^.]*(appointed|discharged) (as )?(House|Senate) conferee[s]?[^.]*", None, {"conference": True}),
+    # Appointing conferees puts the measure in conference committee for that chamber.
+    # Recording it as a state is what lets a later "failed to adopt Conference Committee
+    # Report" fail the measure without a passed -> failed edge. (HB3242, 2023R1)
+    ("conferees_appointed",        r"[^.]*(appointed|discharged) (as )?(House|Senate) conferee[s]?[^.]*", "committee", {"conference": True}),
     ("conference_recommendation",  r"Conference Committee Recommendation:[^.]*", "committee", {"conference": True}),
     ("conference_report_dist",     r"Conference Committee Report distributed[^.]*", None, {"conference": True}),
+    # Reading the conference report into the record is not a third reading of the bill;
+    # the chamber's state is where its own last vote left it. (HB2312, HB2841, 2019R1)
+    ("conference_report_read",     r"Conference Committee Report read in (Senate|House)", None, {"conference": True}),
     ("vote_reconsideration",       r"Vote reconsideration (carried|failed)",      None, {"reconsidered": True}),
     ("rereferred_bare",            r"\bRereferred\b",                   "committee", {}),
     ("notice_reconsideration",     r"[^.]*reconsideration[^.]*", None, {}),
@@ -296,7 +302,7 @@ CHAMBER_FLOW = {
     "work_session": {"committee", "work_session", "public_hearing",
                      "second_reading", "third_reading"},
     "second_reading": {"third_reading", "committee", "failed", "signed_by_presiding"},
-    "third_reading": {"passed", "adopted", "failed", "committee", "third_reading", "second_reading", "signed_by_presiding"},
+    "third_reading": {"passed", "adopted", "failed", "committee", "third_reading", "second_reading"},
     "passed": {"signed_by_presiding", "passed", "committee", "third_reading", "tabled", "second_reading",
                "adopted", "veto_sustained", "veto_overridden"},
     "adopted": {"signed_by_presiding", "committee", "adopted", "third_reading", "passed"},
