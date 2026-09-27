@@ -293,6 +293,9 @@ def parse_row(action_text: str) -> tuple[list[Emit], list[str]]:
 # --------------------------------------------------------------------------
 
 CHAMBER_FLOW = {
+    # None -> third_reading exists for one measure, HCR21 (2021R1), whose first Senate
+    # row is "Final reading ... Adopted." It does not move swap rejection; mapping
+    # final_reading to no state instead cost ~200 resolutions (tried 2026-09-26).
     None: {"introduced", "adopted", "third_reading"},
     "introduced": {"committee", "second_reading", "third_reading", "adopted"},
     "committee": {"committee", "public_hearing", "work_session", "second_reading", "third_reading",
@@ -301,9 +304,9 @@ CHAMBER_FLOW = {
                        "second_reading", "third_reading"},
     "work_session": {"committee", "work_session", "public_hearing",
                      "second_reading", "third_reading"},
-    "second_reading": {"third_reading", "committee", "failed", "signed_by_presiding"},
+    "second_reading": {"third_reading", "committee", "failed"},
     "third_reading": {"passed", "adopted", "failed", "committee", "third_reading", "second_reading"},
-    "passed": {"signed_by_presiding", "passed", "committee", "third_reading", "tabled", "second_reading",
+    "passed": {"signed_by_presiding", "passed", "committee", "third_reading", "tabled",
                "adopted", "veto_sustained", "veto_overridden"},
     "adopted": {"signed_by_presiding", "committee", "adopted", "third_reading", "passed"},
     "failed": {"committee", "failed", "second_reading", "third_reading", "passed", "adopted"},
