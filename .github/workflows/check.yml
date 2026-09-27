@@ -1,0 +1,22 @@
+name: check
+
+# Runs the project's own gate (scripts/check.py) on every push and PR, so branch
+# protection on main can require it. Stdlib only: no install step, matching the
+# repo rule. The cached sessions under cache/ are committed, so no network.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: scripts/check.py (2025R1, the reference corpus)
+        run: python scripts/check.py
