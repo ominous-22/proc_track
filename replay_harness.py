@@ -144,6 +144,9 @@ RULES: list[tuple[str, str, Optional[str], dict]] = [
     ("motion_postpone",            r"Motion to pos[tp]one[^.]*",         None, {"postponed": True}),
     ("motion_postpone",            r"Motion to pos[tp]one[^.]*",         None, {"postponed": True}),
     ("motion_carried_generic",     r"Motion to [^.]*carried[^.]*",      None, {"motion_carried": True}),
+    # "Motion to take and place ... Motion failed." -- a failed motion, not a failed
+    # measure. Longest match beats "failed". (SB554, 2021R1)
+    ("motion_failed_bare",         r"Motion failed",                    None, {"motion_failed": True}),
     ("failed",                     r"\bFailed\b",                       "failed", {}),
     ("refused_to_concur",          r"(House|Senate) refused to concur[^.]*", "committee", {"concurrence": "refused"}),
     ("adopted",                    r"\bAdopted\b",                      "adopted", {}),
@@ -291,7 +294,7 @@ CHAMBER_FLOW = {
                      "second_reading", "third_reading"},
     "second_reading": {"third_reading", "committee", "failed", "passed", "signed_by_presiding"},
     "third_reading": {"passed", "adopted", "failed", "committee", "third_reading", "second_reading", "signed_by_presiding"},
-    "passed": {"signed_by_presiding", "passed", "committee", "third_reading", "tabled", "second_reading", "failed",
+    "passed": {"signed_by_presiding", "passed", "committee", "third_reading", "tabled", "second_reading",
                "adopted", "veto_sustained", "veto_overridden"},
     "adopted": {"signed_by_presiding", "committee", "adopted", "third_reading", "passed"},
     "failed": {"committee", "failed", "second_reading", "third_reading", "passed", "adopted"},
