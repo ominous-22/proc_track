@@ -1,122 +1,129 @@
-# proc_track — procedural state machine + replay harness
+# proc_track
 
-Validates that legislative measures moved legally through a jurisdiction's
-procedure, and measures how confident you're entitled to be about that claim.
+Replays every Oregon legislative bill history from the state's public API and
+checks that each step was a legal move under chamber procedure. When a history
+can't be explained, the replay halts and says why, instead of guessing.
 
-Stdlib only. Python 3.12+. No API key, no network egress beyond
-`api.oregonlegislature.gov`.
+Python 3.12+, standard library only. No API key. Built and maintained solo.
 
-## Setup (Kali)
+## What it shows
+
+Public records are messy. Oregon publishes each bill's history as free-text
+action rows ("Rules suspended. Third reading. Carried by Nash. Passed.") with
+timestamps that contradict the record IDs and fields that can change after
+publication. This project turns that into a validated, per-chamber state
+history with provenance on every transition, then measures how far the
+validation can be trusted.
+
+## Results
+
+Four regular sessions, about 103,000 action rows, 11,723 measures, 120 mapping
+rules.
+
+| session | action rows | measures replayed | adjacent-swap rejection | gate |
+|---|---|---|---|---|
+| 2025R1 | 27,488 | 3,466 / 3,466 | 15.5% | pass |
+| 2021R1 | 24,568 | 2,519 / 2,519 | 19.8% | pass |
+| 2019R1 | 25,563 | 2,767 / 2,768 | 16.8% | 1 open halt |
+| 2023R1 | 25,844 | 2,969 / 2,970 | 12.8% | 1 open halt, swap below floor |
+
+The two open halts are listed under **Known issues**. They are reported rather
+than hidden because the point of the tool is that nothing passes silently.
+
+### Why two numbers
+
+Coverage alone proves nothing: a validator that accepts everything scores 100%.
+So every run also scrambles real histories and counts how many the schema
+refuses. On 2025R1:
+
+- real order rejected: 0 / 400 (must be zero)
+- reversed order rejected: 400 / 400
+- full shuffle rejected: 397 / 400
+- adjacent swap rejected: roughly 15% (the hard case — one swapped pair of
+  events is often still legal procedure)
+
+Coverage and rejection pull against each other. Publishing the pair is what
+makes the coverage number mean something.
+
+## Run it
 
 ```bash
-cd ~
-git init proc_track && cd proc_track   # or drop this tarball here
-python3 -m venv .venv && source .venv/bin/activate
-python --version                        # 3.12 or 3.13
+git clone https://github.com/ominous-22/proc_track && cd proc_track
+make replay     # coverage + ranked halt reasons, 2025R1 (cached, no network)
+make perturb    # false-accept measurement
+make check      # the gate: exits nonzero on any regression
+make check SESSION=2021R1
 ```
 
-Nothing to install.
+Session data for all four sessions is cached in `cache/`. To re-pull from the
+API: `make fetch SESSION=2025R1` (about 27k rows, six paged requests).
 
-## The loop
-
-```bash
-# 1. pull a session to ./cache (~27k rows, ~7 MB, 6 paged requests)
-python scripts/fetch_session.py 2025R1
-
-# 2. coverage: can every measure replay?
-python scripts/bulk_replay.py 2025R1
-
-# 3. false-accept: does the schema refuse scrambled histories?
-python scripts/perturbation_test.py 2025R1
-
-# 4. tighten: derive per-chamber graphs from what the corpus actually does
-python scripts/derive_chamber_flows.py 2025R1
-```
-
-Single measure, for debugging a specific trajectory:
+One bill, for tracing a single trajectory:
 
 ```bash
 python replay_harness.py --session 2025R1 --measures SB976
 ```
 
-## Current numbers (2025R1, 27,488 rows, 3,466 measures)
+## How it works
 
-| metric | value |
-|---|---|
-| completion | 3466/3466 = 100.0% |
-| reversed rejected | 100.0% |
-| full shuffle rejected | 99.2% |
-| adjacent swap rejected | 35.2% (with derived per-chamber flows; 14.5% with the shared graph) |
-| rules | 79 |
+1. **Fetch** — page Oregon's OData `MeasureHistoryActions` into a local cache.
+2. **Map** — match each action row against 120 regex rules using span offsets
+   over the whole row. A row can emit several events. Overlaps resolve
+   longest-match-wins, and every emitted event carries `(rule_id, start, end)`
+   so any state can be traced back to the exact characters that produced it.
+3. **Validate** — step each event through a per-chamber transition graph.
+   Unrecognized text or an illegal move halts the replay (fail closed).
+4. **Measure** — `bulk_replay` ranks halts and unmatched text fragments;
+   `perturbation_test` measures false acceptance; `check` enforces both floors.
 
-Two numbers matter, and they pull against each other. Coverage alone proves
-nothing — a validator that accepts everything scores 100%. Publish the pair.
+## Things the data forced
 
-## The development loop
+Each of these was a bug first.
 
-Run `bulk_replay.py`, read the top halt reason, add or fix **one** rule in
-`replay_harness.py`, rerun.
+- **Don't split on sentence boundaries.** Citations ("Art. V, sec. 15b") and
+  initials ("Carried by Smith G.") are full of periods.
+- **A row is a sequence of events, not one event.**
+- **A bill has a state in each chamber**, not one global state. Otherwise
+  second-chamber first reading looks illegal after origin passage.
+- **A failed motion is not a failed bill.** "Motion to substitute Minority
+  Report ... failed" must not mark the measure failed.
+- **Vetoed is not terminal.** SB 875 (2025) was vetoed, repassed over the veto
+  in the Senate, tabled in the House, and the veto sustained, over four days.
+- **Sort by `ActionDate`, not record ID.** IDs contradict timestamps (SB 976:
+  id 654676 at 08:33 precedes 654677 at 08:32).
+- **Records are mutable.** Rows carry a `ModifiedDate`, so a transition should
+  stamp the rule set it was validated against rather than be recomputed later.
+- **Don't hard-code assumptions from one chamber.** The House sends bills to the
+  governor too (351 "Governor signed" rows in the House vs 282 in the Senate),
+  and 5.8% of passages happen without a rules suspension.
 
-- Completion must never go down. If it does, the rule you added is greedy and
-  is swallowing a real transition out of a longer row. This happened once
-  already: `Special Order of Business[^.]*` ate `Third reading` out of
-  "Special Order of Business, Third reading. Passed."
-- Then rerun `perturbation_test.py`. If completion held and adjacent-swap
-  rejection rose, the change was real tightening. If swap rejection fell, you
-  widened the graph to paper over a mapping bug — fix the rule instead.
+## Development rule
 
-## Design decisions that were expensive to learn
+Read the top halt, change one rule, rerun the gate. If coverage drops, the new
+rule is greedy and is swallowing a real transition from a longer row. If
+coverage holds but swap rejection drops, the graph was widened to hide a
+mapping bug — fix the rule, not the graph.
 
-- **Never split action text on sentence boundaries.** Legal citations
-  ("Art. V, sec. 15b") and legislator initials ("Carried by Smith G.") are full
-  of periods. Match with span offsets over the whole row instead; overlaps
-  resolve longest-match-wins, emits are ordered by start offset, and every
-  transition carries `(rule_id, start, end)` for provenance.
-- **A row is a sequence of events, not one event.** "Rules suspended. Third
-  reading. Carried by Nash. Passed." is four.
-- **A measure has a state in each chamber, not one global state.** A single
-  state field makes second-chamber first reading illegal after origin passage.
-- **A failed *motion* is not a failed *measure*.** "Motion to substitute
-  Minority Report ... failed" must not set the measure to `failed`.
-- **`vetoed` is not terminal.** SB 875 (2025): vetoed 06-24, Senate repassed
-  over the veto 06-25, House tabled 06-26, veto sustained 06-27. The override
-  succeeded in one chamber and died in the other.
-- **Resolutions are a second grammar.** `Do adopt` / `Final reading` /
-  `Adopted` — they never touch the pass/enact vocabulary.
-- **`ActionDate` is the only defensible sort key.** `MeasureHistoryId` order
-  contradicts it (id 654676 @ 08:33 precedes 654677 @ 08:32 in SB976).
-- **`ActionDate` vs `CreatedDate` is occurred_at vs recorded_at**, and rows
-  carry a `ModifiedDate` — upstream records are mutable after publication.
-  That's why a transition must stamp the schema hash it was validated against
-  rather than recompute from the calendar at replay time.
-- **Rules suspension is not required for passage** — 78 of 1,334 passage rows
-  (5.8%). Don't gate the passage edge on it.
-- **The House sends bills to the governor too** — 351 "Governor signed" rows in
-  H vs 282 in S. Don't hard-code the executive path to one chamber.
+## Known issues
 
-## Claude Code
+- **2019R1:** one measure halts on `S: passed -> second_reading`. Two graph edges
+  that let it pass were removed on purpose because they only existed for that
+  one bill (HB 2998) and weakened rejection everywhere else.
+- **2023R1:** one measure halts on an unmapped action ("Rescission of the
+  subsequent referral denied by Order of the President"), and adjacent-swap
+  rejection sits at 12.8%, under the 14% floor.
+- Per-chamber flow graphs are derived for 2023R1 and 2025R1 only.
 
-The repo ships a `CLAUDE.md` with the invariants, the hard rules, and the queued
-task. `scripts/check.py` is the gate — it exits nonzero on a coverage or
-false-accept regression, so an agent can verify its own edits without asking.
-
-## Contents
+## Layout
 
 ```
-replay_harness.py                    mapping table + schema + validator (79 rules)
-schemas/or_legislature_v2.yaml       effective-dated Oregon pack (hand-written, partly unverified)
-scripts/fetch_session.py             paginated session download -> cache/
-scripts/bulk_replay.py               coverage + ranked halts + uncovered fragments
-scripts/perturbation_test.py         false-accept measurement
-scripts/derive_chamber_flows.py      learn per-chamber graphs from the corpus
-data/sb976_trajectory.json           SB 976 (2025R1) — the vetoed reference bill
-data/or2025r1_action_templates.csv   368 action templates ranked by frequency
-cache/2025R1.json                    pre-seeded, delete to re-fetch
+replay_harness.py            mapping rules + transition graph + validator
+scripts/fetch_session.py     paged session download -> cache/
+scripts/bulk_replay.py       coverage, ranked halts, unmatched fragments
+scripts/perturbation_test.py false-accept measurement
+scripts/derive_chamber_flows.py  derive per-chamber graphs from a clean run
+scripts/check.py             regression gate
+schemas/                     derived chamber flows + draft Oregon YAML pack
+cache/                       four sessions of raw API data
+data/                        reference trajectory (SB 976) + action templates
 ```
-
-## Next
-
-Run against a second session (`2023R1`, `2024R1`). The rule set has only ever
-seen 2025. If 2023 replays at 95%+ with a dozen additions, this is Oregon
-procedure. If it needs 40 new rules, it's 2025 clerical style, and the
-per-session maintenance cost is the real product risk.

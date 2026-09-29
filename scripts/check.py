@@ -68,7 +68,8 @@ def main(session="2025R1"):
     ]:
         passed = value >= floor
         ok &= passed
-        print(f"  [{'PASS' if passed else 'FAIL'}] {label}: {value:.1f}% (floor {floor}%)")
+        detail = f" ({completed}/{len(by)})" if label == "coverage" else ""
+        print(f"  [{'PASS' if passed else 'FAIL'}] {label}: {value:.1f}%{detail} (floor {floor}%)")
     if real_rejected:
         ok = False
         print(f"  [FAIL] {real_rejected} real histories rejected — must be 0")
